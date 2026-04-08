@@ -25,7 +25,9 @@ final class DBManager {
         case 'mysql':
           return Mysql::connect($config['host'], $config['username'], $config['password'], $config['database']);
         case 'sqlite':
-          return Sqlite3::connect($config['database']);
+          $directory = dirname($config['database']);
+          $fileName = pathinfo($config['database'], PATHINFO_FILENAME);
+          return new Sqlite3($directory, $fileName);
         default:
           throw new DatabaseException("Unsupported database type: $type");
       }
