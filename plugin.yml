@@ -1,0 +1,16 @@
+name: LibDB
+version: 1.0.0
+
+authors:
+ - ImperaZim
+
+api: 5.0.0
+main: imperazim\db\LibDB
+load: STARTUP
+
+extensions:
+  Core: ">=8.2"
+
+autoload:
+  psr-4:
+    imperazim\\db\\: src/imperazim/db
