@@ -4,161 +4,211 @@ declare(strict_types = 1);
 
 namespace imperazim\db;
 
-use GlobalLogger;
 use PDO;
 use PDOException;
+use PDOStatement;
 use imperazim\db\exception\DatabaseException;
 
 /**
-* Class Sqlite3
-* @package imperazim\db
+* SQLite database driver using PDO.
+*
+* All table/column names are sanitized with backtick quoting.
+* Values are always bound via prepared statements.
 */
-final class Sqlite3 {
+final class Sqlite3 implements Database {
 
-  /** @var PDO|null */
-  private ?PDO $sqlite = null;
+    private PDO $sqlite;
 
-  /**
-  * Sqlite3 constructor.
-  * @param string $directory The directory of the file.
-  * @param string $fileName The name of the file.
-  */
-  public function __construct(
-    private ?string $directory,
-    private ?string $fileName
-  ) {
-    $directory = rtrim(str_replace('//', '/', $directory . '/'), '/') . '/';
-    try {
-      $this->sqlite = new PDO('sqlite:' . $directory . $fileName . '.db', null, null, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
-      ]);
-    } catch (PDOException $e) {
-      throw new DatabaseException("SQLite connection error: " . $e->getMessage(), 0, $e);
+    /**
+    * @param string $directory Directory for the .db file
+    * @param string $fileName Database file name (without .db extension)
+    */
+    public function __construct(
+        string $directory,
+        string $fileName
+    ) {
+        $directory = rtrim(str_replace('//', '/', $directory . '/'), '/') . '/';
+        try {
+            $this->sqlite = new PDO('sqlite:' . $directory . $fileName . '.db', null, null, [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
+            ]);
+        } catch (PDOException $e) {
+            throw new DatabaseException("SQLite connection error: " . $e->getMessage(), 0, $e);
+        }
     }
-  }
 
-  /**
-  * Creates tables if they do not exist.
-  * @param array $tables An associative array where the key is the table name and the value is the SQL query to create the table.
-  * @return void
-  */
-  public function createTableIfNotExists(array $tables): void {
-    try {
-      foreach ($tables as $table => $rows) {
-        $rows = implode(", ", array_keys($rows));
-        $this->sqlite->exec("CREATE TABLE IF NOT EXISTS $table ($rows)");
-      }
-    } catch (PDOException $e) {
-      throw new DatabaseException("SQLite create table error: " . $e->getMessage(), 0, $e);
+    public function createTableIfNotExists(array $tables): void {
+        try {
+            foreach ($tables as $table => $rows) {
+                $safeName = self::quoteName($table);
+                $columnDefs = implode(", ", array_keys($rows));
+                $this->sqlite->exec("CREATE TABLE IF NOT EXISTS $safeName ($columnDefs)");
+            }
+        } catch (PDOException $e) {
+            throw new DatabaseException("SQLite create table error: " . $e->getMessage(), 0, $e);
+        }
     }
-  }
 
-  /**
-  * Inserts data into a specified table.
-  * @param string $table The name of the table to insert data into.
-  * @param array $data An associative array where the key is the column name and the value is the value to insert.
-  * @return void
-  */
-  public function insert(string $table, array $data): void {
-    try {
-      $columns = implode(", ", array_keys($data));
-      $placeholders = implode(", ", array_fill(0, count($data), "?"));
-      $values = array_values($data);
+    public function insert(string $table, array $data): void {
+        try {
+            $columns = implode(", ", array_map([self::class, 'quoteName'], array_keys($data)));
+            $placeholders = implode(", ", array_fill(0, count($data), "?"));
+            $values = array_values($data);
 
-      $sql = "INSERT INTO $table ($columns) VALUES ($placeholders)";
-      $stmt = $this->sqlite->prepare($sql);
-      $stmt->execute($values);
-    } catch (PDOException $e) {
-      throw new DatabaseException("SQLite insert error: " . $e->getMessage(), 0, $e);
+            $sql = "INSERT INTO " . self::quoteName($table) . " ($columns) VALUES ($placeholders)";
+            $stmt = $this->sqlite->prepare($sql);
+            $stmt->execute($values);
+        } catch (PDOException $e) {
+            throw new DatabaseException("SQLite insert error: " . $e->getMessage(), 0, $e);
+        }
     }
-  }
 
-  /**
-  * Selects data from a specified table with optional filters.
-  * @param string $table The name of the table to select data from.
-  * @param string $column The column(s) to select.
-  * @param array $filters An array of associative arrays for filtering the results.
-  * @return array The selected data.
-  */
-  public function select(string $table, string $column, array $filters = []): array {
-    try {
-      $sql = "SELECT $column FROM $table";
-      $values = [];
+    public function select(string $table, string $columns, array $filters = []): array {
+        try {
+            $safeColumns = $columns === '*' ? '*' : implode(", ", array_map(
+                [self::class, 'quoteName'],
+                array_map('trim', explode(',', $columns))
+            ));
+            $sql = "SELECT $safeColumns FROM " . self::quoteName($table);
+            $values = [];
 
-      if (!empty($filters)) {
-        $sql .= " WHERE " . $this->buildWhereClause($filters, $values);
-      }
+            if (!empty($filters)) {
+                $sql .= " WHERE " . $this->buildWhereClause($filters, $values);
+            }
 
-      $stmt = $this->sqlite->prepare($sql);
-      $stmt->execute($values);
-      return $stmt->fetchAll();
-    } catch (PDOException $e) {
-      throw new DatabaseException("SQLite select error: " . $e->getMessage(), 0, $e);
+            $stmt = $this->sqlite->prepare($sql);
+            $stmt->execute($values);
+            return $stmt->fetchAll();
+        } catch (PDOException $e) {
+            throw new DatabaseException("SQLite select error: " . $e->getMessage(), 0, $e);
+        }
     }
-  }
 
-  /**
-  * Updates data in a specified table.
-  * @param string $table The name of the table to update data in.
-  * @param string $column The column to update.
-  * @param mixed $value The new value to set.
-  * @param array $filters An array of associative arrays for filtering the rows to update.
-  * @return bool Whether any rows were updated.
-  */
-  public function update(string $table, string $column, $value, array $filters = []): bool {
-    try {
-      $sql = "UPDATE $table SET $column = ?";
-      $values = [$value];
-      if (!empty($filters)) {
-        $sql .= " WHERE " . $this->buildWhereClause($filters, $values);
-      }
-      $stmt = $this->sqlite->prepare($sql);
-      $stmt->execute($values);
-      return $stmt->rowCount() > 0;
-    } catch (PDOException $e) {
-      throw new DatabaseException("SQLite update error: " . $e->getMessage(), 0, $e);
+    public function update(string $table, string $column, mixed $value, array $filters = []): bool {
+        try {
+            $sql = "UPDATE " . self::quoteName($table) . " SET " . self::quoteName($column) . " = ?";
+            $values = [$value];
+            if (!empty($filters)) {
+                $sql .= " WHERE " . $this->buildWhereClause($filters, $values);
+            }
+            $stmt = $this->sqlite->prepare($sql);
+            $stmt->execute($values);
+            return $stmt->rowCount() > 0;
+        } catch (PDOException $e) {
+            throw new DatabaseException("SQLite update error: " . $e->getMessage(), 0, $e);
+        }
     }
-  }
 
-  /**
-  * Checks if a record exists in a specified table.
-  * @param string $table The name of the table to check.
-  * @param array $conditions An array of associative arrays for the conditions to check.
-  * @return bool Whether the record exists.
-  */
-  public function exists(string $table, array $conditions): bool {
-    try {
-      $sql = "SELECT COUNT(*) AS count FROM $table WHERE ";
-      $values = [];
-
-      $sql .= $this->buildWhereClause($conditions, $values);
-
-      $stmt = $this->sqlite->prepare($sql);
-      $stmt->execute($values);
-      $row = $stmt->fetch();
-      return $row['count'] > 0;
-    } catch (PDOException $e) {
-      throw new DatabaseException("SQLite exists error: " . $e->getMessage(), 0, $e);
+    public function delete(string $table, array $filters): int {
+        if (empty($filters)) {
+            throw new DatabaseException("Cannot delete without conditions. Use query() for raw DELETE.");
+        }
+        try {
+            $values = [];
+            $sql = "DELETE FROM " . self::quoteName($table) . " WHERE " . $this->buildWhereClause($filters, $values);
+            $stmt = $this->sqlite->prepare($sql);
+            $stmt->execute($values);
+            return $stmt->rowCount();
+        } catch (PDOException $e) {
+            throw new DatabaseException("SQLite delete error: " . $e->getMessage(), 0, $e);
+        }
     }
-  }
 
-  /**
-  * Builds a WHERE clause from an array of conditions.
-  * @param array $filters An array of associative arrays for filtering the results.
-  * @param array $values Reference to the values array to be used in the prepared statement.
-  * @return string The WHERE clause.
-  */
-  private function buildWhereClause(array $filters, array &$values): string {
-    $whereClauses = [];
-    foreach ($filters as $filter) {
-      $clauses = [];
-      foreach ($filter as $key => $value) {
-        $clauses[] = "$key = ?";
-        $values[] = $value;
-      }
-      $whereClauses[] = implode(" AND ", $clauses);
+    public function exists(string $table, array $conditions): bool {
+        try {
+            $values = [];
+            $sql = "SELECT COUNT(*) AS count FROM " . self::quoteName($table) . " WHERE " . $this->buildWhereClause($conditions, $values);
+            $stmt = $this->sqlite->prepare($sql);
+            $stmt->execute($values);
+            $row = $stmt->fetch();
+            return $row['count'] > 0;
+        } catch (PDOException $e) {
+            throw new DatabaseException("SQLite exists error: " . $e->getMessage(), 0, $e);
+        }
     }
-    return implode(" AND ", $whereClauses);
-  }
+
+    public function query(string $sql, array $params = []): array {
+        try {
+            $stmt = $this->sqlite->prepare($sql);
+            $stmt->execute($params);
+            if ($stmt->columnCount() > 0) {
+                return $stmt->fetchAll();
+            }
+            return [];
+        } catch (PDOException $e) {
+            throw new DatabaseException("SQLite query error: " . $e->getMessage(), 0, $e);
+        }
+    }
+
+    /**
+    * Inserts or replaces a row (upsert via SQLite's INSERT OR REPLACE).
+    *
+    * @param string $table Table name
+    * @param array $data Column => value pairs
+    */
+    public function upsert(string $table, array $data): void {
+        try {
+            $columns = implode(", ", array_map([self::class, 'quoteName'], array_keys($data)));
+            $placeholders = implode(", ", array_fill(0, count($data), "?"));
+            $values = array_values($data);
+
+            $sql = "INSERT OR REPLACE INTO " . self::quoteName($table) . " ($columns) VALUES ($placeholders)";
+            $stmt = $this->sqlite->prepare($sql);
+            $stmt->execute($values);
+        } catch (PDOException $e) {
+            throw new DatabaseException("SQLite upsert error: " . $e->getMessage(), 0, $e);
+        }
+    }
+
+    /**
+    * Executes a callback within a transaction.
+    *
+    * @param \Closure $callback fn(Sqlite3): void
+    */
+    public function transaction(\Closure $callback): void {
+        try {
+            $this->sqlite->beginTransaction();
+            $callback($this);
+            $this->sqlite->commit();
+        } catch (\Throwable $e) {
+            $this->sqlite->rollBack();
+            throw new DatabaseException("SQLite transaction error: " . $e->getMessage(), 0, $e);
+        }
+    }
+
+    public function close(): void {
+        unset($this->sqlite);
+    }
+
+    /**
+    * Gets the underlying PDO instance.
+    */
+    public function getPdo(): PDO {
+        return $this->sqlite;
+    }
+
+    /**
+    * Sanitizes an identifier (table/column name) with backtick quoting.
+    */
+    private static function quoteName(string $name): string {
+        $name = trim($name);
+        if ($name === '*') {
+            return $name;
+        }
+        return '`' . str_replace('`', '``', $name) . '`';
+    }
+
+    private function buildWhereClause(array $filters, array &$values): string {
+        $whereClauses = [];
+        foreach ($filters as $filter) {
+            $clauses = [];
+            foreach ($filter as $key => $value) {
+                $clauses[] = self::quoteName($key) . " = ?";
+                $values[] = $value;
+            }
+            $whereClauses[] = implode(" AND ", $clauses);
+        }
+        return implode(" AND ", $whereClauses);
+    }
 }
