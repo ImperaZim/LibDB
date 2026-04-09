@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace imperazim\db\async;
 
+use Closure;
 use pocketmine\Server;
 
 /**
@@ -29,10 +30,10 @@ final class AsyncQuery {
     * @param string $dbPath Full path to SQLite database file
     * @param string $sql SQL query with ? placeholders
     * @param array $params Bound parameters
-    * @param \Closure|null $onComplete fn(array $rows): void — called on main thread
-    * @param \Closure|null $onError fn(\Throwable $error): void — called on main thread
+    * @param Closure|null $onComplete fn(array $rows): void — called on main thread
+    * @param Closure|null $onError fn(\Throwable $error): void — called on main thread
     */
-    public static function sqlite(string $dbPath, string $sql, array $params = [], ?\Closure $onComplete = null, ?\Closure $onError = null): void {
+    public static function sqlite(string $dbPath, string $sql, array $params = [], ?Closure $onComplete = null, ?Closure $onError = null): void {
         $task = new AsyncDatabaseTask('sqlite', ['database' => $dbPath], $sql, $params, $onComplete, $onError);
         Server::getInstance()->getAsyncPool()->submitTask($task);
     }
@@ -43,10 +44,10 @@ final class AsyncQuery {
     * @param array $config Connection config: host, username, password, database
     * @param string $sql SQL query with ? placeholders
     * @param array $params Bound parameters
-    * @param \Closure|null $onComplete fn(array $rows): void — called on main thread
-    * @param \Closure|null $onError fn(\Throwable $error): void — called on main thread
+    * @param Closure|null $onComplete fn(array $rows): void — called on main thread
+    * @param Closure|null $onError fn(\Throwable $error): void — called on main thread
     */
-    public static function mysql(array $config, string $sql, array $params = [], ?\Closure $onComplete = null, ?\Closure $onError = null): void {
+    public static function mysql(array $config, string $sql, array $params = [], ?Closure $onComplete = null, ?Closure $onError = null): void {
         $task = new AsyncDatabaseTask('mysql', $config, $sql, $params, $onComplete, $onError);
         Server::getInstance()->getAsyncPool()->submitTask($task);
     }

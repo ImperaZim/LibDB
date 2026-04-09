@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace imperazim\db\cache;
 
+use Closure;
 use imperazim\db\Database;
 
 /**
@@ -37,10 +38,10 @@ final class CacheLayer {
     *
     * @param string $key Cache key
     * @param int|null $ttl TTL in seconds (null = default)
-    * @param \Closure $loader Callback that returns the data to cache
+    * @param Closure $loader Callback that returns the data to cache
     * @return mixed Cached or freshly loaded data
     */
-    public function remember(string $key, ?int $ttl, \Closure $loader): mixed {
+    public function remember(string $key, ?int $ttl, Closure $loader): mixed {
         if ($this->has($key)) {
             return $this->cache[$key]['data'];
         }

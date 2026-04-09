@@ -7,6 +7,8 @@ namespace imperazim\db;
 use mysqli;
 use mysqli_result;
 use mysqli_sql_exception;
+use Closure;
+use Throwable;
 use imperazim\db\exception\DatabaseException;
 
 /**
@@ -206,14 +208,14 @@ final class Mysql implements Database {
     /**
     * Executes a callback within a transaction.
     *
-    * @param \Closure $callback fn(Mysql): void
+    * @param Closure $callback fn(Mysql): void
     */
-    public function transaction(\Closure $callback): void {
+    public function transaction(Closure $callback): void {
         try {
             $this->connection->begin_transaction();
             $callback($this);
             $this->connection->commit();
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             $this->connection->rollback();
             throw new DatabaseException("MySQL transaction error: " . $e->getMessage(), 0, $e);
         }

@@ -7,6 +7,8 @@ namespace imperazim\db;
 use PDO;
 use PDOException;
 use PDOStatement;
+use Closure;
+use Throwable;
 use imperazim\db\exception\DatabaseException;
 
 /**
@@ -164,14 +166,14 @@ final class Sqlite3 implements Database {
     /**
     * Executes a callback within a transaction.
     *
-    * @param \Closure $callback fn(Sqlite3): void
+    * @param Closure $callback fn(Sqlite3): void
     */
-    public function transaction(\Closure $callback): void {
+    public function transaction(Closure $callback): void {
         try {
             $this->sqlite->beginTransaction();
             $callback($this);
             $this->sqlite->commit();
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             $this->sqlite->rollBack();
             throw new DatabaseException("SQLite transaction error: " . $e->getMessage(), 0, $e);
         }

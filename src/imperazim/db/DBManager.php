@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace imperazim\db;
 
 use imperazim\db\exception\DatabaseException;
+use Exception;
 
 /**
 * Factory for creating database connections.
@@ -45,7 +46,7 @@ final class DBManager {
             };
         } catch (DatabaseException $e) {
             throw $e;
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             throw new DatabaseException("Failed to connect to the database: " . $e->getMessage(), 0, $e);
         }
     }
